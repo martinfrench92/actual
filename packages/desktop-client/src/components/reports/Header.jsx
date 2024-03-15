@@ -66,9 +66,11 @@ function Header({
   start,
   end,
   forecast,
+  forecastSource,
   show1Month,
   allMonths,
   allForecasts,
+  allForecastSource,
   disabled,
   onChangeDates,
   filters,
@@ -79,6 +81,7 @@ function Header({
   onCondOpChange,
   headerPrefixItems,
   selectGraph,
+  onForecastSourceChange,
 }) {
   const location = useLocation();
   const path = location.pathname;
@@ -140,21 +143,7 @@ function Header({
               value={end}
               options={allMonths.map(({ name, pretty }) => [name, pretty])}
             />
-            {forecast && <View>+</View>}
-            {forecast && (
-              <Select
-                style={{ backgroundColor: 'white' }}
-                onChange={newValue =>
-                  onChangeDates(
-                    ...validateStart(allMonths, start, end),
-                    newValue,
-                  )
-                }
-                value={forecast}
-                options={allForecasts.map(({ name, pretty }) => [name, pretty])}
-                disabledKeys={disabled}
-              />
-            )}
+            
           </View>
 
           {filters && <FilterButton onApply={onApply} type="accounts" />}
@@ -192,6 +181,36 @@ function Header({
             All Time
           </Button>
           <View style={{ flex: 1 }} />
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            {forecast && <View>Forecast</View>}
+            {forecast && (
+              <Select
+                style={{ backgroundColor: 'white' }}
+                onChange={newValue =>
+                  onForecastSourceChange(newValue)
+                }
+                value={forecastSource}
+                options={allForecastSource.map(({ name, pretty }) => [name, pretty])}
+              />
+            )}
+            {forecast && (
+              <Select
+                style={{ backgroundColor: 'white' }}
+                onChange={newValue =>
+                  onChangeDates(...validateStart(allMonths, start, end), newValue)
+                }
+                value={forecast}
+                options={allForecasts.map(({ name, pretty }) => [name, pretty])}
+                disabledKeys={disabled}
+              />
+            )}
+          </View>
         </View>
       )}
       {filters && filters.length > 0 && (

@@ -48,6 +48,7 @@ export function cashFlowByDate(
   start,
   end,
   forecast,
+  forecastSource,
   isConcise,
   conditions = [],
   conditionsOp,
@@ -121,10 +122,10 @@ export function cashFlowByDate(
       });
     }
 
-    const { data } = await runQuery(scheduleQuery);
+    const { data: scheduledata } = await runQuery(scheduleQuery);
 
     const schedules = await Promise.all(
-      data.map(schedule => {
+      scheduledata.map(schedule => {
         if (typeof schedule._date !== 'string') {
           return sendCatch('schedule/get-occurrences-to-date', {
             config: schedule._date,
@@ -137,6 +138,30 @@ export function cashFlowByDate(
           schedule._dates = [schedule._date];
           return schedule;
         }
+      }),
+    );
+
+    const goalQuery = q('categories')
+      .select(['*'])
+      .filter({ goal_def: { $ne: 'null' } });
+
+    const { data: goal_categories } = await runQuery(goalQuery);
+    const templates = [];
+    goal_categories.reduce((templates, category) => {
+      templates[category.id] = JSON.parse(category.goal_def);
+      return templates;
+    }, templates);
+
+    const months = monthUtils.range(end, forecast);
+
+    const budgetsForMonths = await Promise.all(
+      months.map(month => {
+        return sendCatch('report-budget-month', {
+          month,
+        }).then(values => {
+          const schedAdjustment = 0;
+          return { month, values, schedAdjustment };
+        });
       }),
     );
 
@@ -162,6 +187,9 @@ export function cashFlowByDate(
             isConcise,
             schedules,
             filters,
+            budgetsForMonths,
+            templates,
+            forecastSource,
           ),
         );
       },
@@ -177,8 +205,11 @@ function recalculate(
   isConcise,
   schedules,
   filters,
+  budgetsForMonths,
+  templates,
+  forecastSource,
 ) {
-  const [startingBalance, income, expense] = data;
+  const [startingBalance, income, expense, budgets] = data;
   const convIncome = income.map(t => {
     return { ...t, isTransfer: t.isTransfer !== null };
   });
@@ -188,63 +219,99 @@ function recalculate(
 
   const futureIncome = [];
   const futureExpense = [];
-  schedules.forEach(schedule => {
-    schedule._dates?.forEach(date => {
-      const futureTx = {
-        date: isConcise ? monthUtils.monthFromDate(date) : date,
-        isTransfer: schedule.isTransfer != null,
-        trasferAccount: schedule.isTransfer,
-        amount:
-          schedule._amountOp === 'isbetween'
-            ? (schedule._amount.num1 + schedule._amount.num2) / 2
-            : schedule._amount,
-      };
+  
+  if (forecastSource === 'schedule') {
+    schedules.forEach(schedule => {
+      schedule._dates?.forEach(date => {
+        const futureTx = {
+          date: isConcise ? monthUtils.monthFromDate(date) : date,
+          isTransfer: schedule.isTransfer != null,
+          trasferAccount: schedule.isTransfer,
+          amount:
+            schedule._amountOp === 'isbetween'
+              ? (schedule._amount.num1 + schedule._amount.num2) / 2
+              : schedule._amount,
+        };
 
-      const includeFutureTx =
-        filters.reduce((include, filter) => {
+        const includeFutureTx =
+          filters.reduce((include, filter) => {
+            return (
+              include ||
+              (filter.hasOwnProperty('account')
+                ? filter.account.$eq === schedule._account
+                : true)
+            );
+          }, filters.length === 0) && !schedule.isAccountOffBudget;
+
+        const includeTransfer = filters.reduce((include, filter) => {
           return (
             include ||
             (filter.hasOwnProperty('account')
-              ? filter.account.$eq === schedule._account
+              ? filter.account.$eq === futureTx.trasferAccount
               : true)
           );
-        }, filters.length === 0) && !schedule.isAccountOffBudget;
+        }, filters.length === 0);
 
-      const includeTransfer = filters.reduce((include, filter) => {
-        return (
-          include ||
-          (filter.hasOwnProperty('account')
-            ? filter.account.$eq === futureTx.trasferAccount
-            : true)
-        );
-      }, filters.length === 0);
-
-      if (
-        futureTx.isTransfer &&
-        !schedule.isPayeeOffBudget &&
-        includeTransfer
-      ) {
-        const futureTxTransfer = {
-          date: isConcise ? monthUtils.monthFromDate(date) : date,
-          isTransfer: schedule.isTransfer != null,
-          amount: -schedule._amount,
-        };
-        if (futureTxTransfer.amount < 0) {
-          futureExpense.push(futureTxTransfer);
-        } else {
-          futureIncome.push(futureTxTransfer);
+        if (
+          futureTx.isTransfer &&
+          !schedule.isPayeeOffBudget &&
+          includeTransfer
+        ) {
+          const futureTxTransfer = {
+            date: isConcise ? monthUtils.monthFromDate(date) : date,
+            isTransfer: schedule.isTransfer != null,
+            amount: -schedule._amount,
+          };
+          if (futureTxTransfer.amount < 0) {
+            futureExpense.push(futureTxTransfer);
+          } else {
+            futureIncome.push(futureTxTransfer);
+          }
         }
-      }
 
-      if (includeFutureTx) {
-        if (futureTx.amount < 0) {
-          futureExpense.push(futureTx);
-        } else {
-          futureIncome.push(futureTx);
+        if (includeFutureTx) {
+          if (futureTx.amount < 0) {
+            futureExpense.push(futureTx);
+          } else {
+            futureIncome.push(futureTx);
+          }
         }
-      }
+        let budgetsinthismonth = budgetsForMonths.filter(budgetMonth => {
+          return budgetMonth.month === monthUtils.monthFromDate(date);
+        });
+      });
     });
-  });
+  }
+  if (forecastSource === 'budget') {
+    budgetsForMonths.forEach(budgetMonth => {
+      const month = budgetMonth.month
+      const monthsheet = monthUtils.sheetForMonth(month);
+      const monthLeftover = budgetMonth.values.data.find(
+        budgetElement => budgetElement.name === monthsheet + '!total-leftover',
+      ).value;
+
+      const budgetExpenses = {
+        date: isConcise ? monthUtils.monthFromDate(month) : monthUtils.subDays(monthUtils.nextMonth(month), 1),
+        isTransfer: false,
+        amount: -monthLeftover,
+      };
+
+      futureExpense.push(budgetExpenses);
+
+      const monthIncomeLeftover = budgetMonth.values.data.find(
+        budgetElement => budgetElement.name === monthsheet + '!total-income-leftover',
+      ).value;
+
+      const budgetIncome = {
+        date: isConcise ? monthUtils.monthFromDate(month) : monthUtils.subDays(monthUtils.nextMonth(month), 1),
+        isTransfer: false,
+        amount: monthIncomeLeftover,
+      };
+
+      futureIncome.push(budgetIncome);
+
+    });
+  }
 
   const dates = isConcise
     ? monthUtils.rangeInclusive(
@@ -365,6 +432,18 @@ function recalculate(
   graphData.futureBalances = futureGraphData.balances;
   graphData.futureIncome = futureGraphData.income;
   graphData.futureExpenses = futureGraphData.expenses;
+
+  function stackBars(history, forecast) {
+    if (history !== undefined && forecast !== undefined && d.isEqual(history.x, forecast.x)) {
+      forecast.y = forecast.y + history.y;
+      forecast.y0 = history.y;
+    }
+  }
+  stackBars(graphData.income.slice(-1)[0], graphData.futureIncome.slice(0)[0]);
+  stackBars(
+    graphData.expenses.slice(-1)[0],
+    graphData.futureExpenses.slice(0)[0],
+  );
 
   return {
     graphData,

@@ -235,6 +235,7 @@ handlers['report-budget-month'] = async function ({ month }) {
     value('total-spent'),
     value('real-saved'),
     value('total-leftover'),
+    value('total-income-leftover'),
   ];
 
   for (const group of groups) {

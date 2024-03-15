@@ -41,9 +41,10 @@ export default function CashFlow(): JSX.Element {
   const forecastFeatureFlag = useFeatureFlag('cashflowForecast');
   const [forecast, setForecast] = useState(
     forecastFeatureFlag
-      ? monthUtils.addDays(monthUtils.currentDay(), 31)
+      ? monthUtils.addDays(monthUtils.currentDay(), 6 * 31)
       : monthUtils.currentMonth(),
   );
+  const [forecastSource, setForecastSource] = useState(null);
 
   const [isConcise, setIsConcise] = useState(() => {
     const numDays = d.differenceInCalendarDays(
@@ -55,8 +56,8 @@ export default function CashFlow(): JSX.Element {
 
   const params = useMemo(
     () =>
-      cashFlowByDate(start, end, forecast, isConcise, filters, conditionsOp),
-    [start, end, forecast, isConcise, filters, conditionsOp],
+      cashFlowByDate(start, end, forecast, forecastSource, isConcise, filters, conditionsOp),
+    [start, end, forecast, forecastSource, isConcise, filters, conditionsOp],
   );
   const data = useReport('cash_flow', params);
 
@@ -84,6 +85,17 @@ export default function CashFlow(): JSX.Element {
     },
   ];
 
+  const allForecastSource = [
+    {
+      name: 'schedule',
+      pretty: 'Schedules',
+    },
+    {
+      name: 'budget',
+      pretty: 'Budget',
+    },
+  ];
+
   useEffect(() => {
     async function run() {
       const trans = await send('get-earliest-transaction');
@@ -101,6 +113,7 @@ export default function CashFlow(): JSX.Element {
 
       setAllMonths(allMonths);
       setAllForecasts(forecastMonths);
+      setForecastSource('schedule');
     }
     run();
   }, []);
@@ -146,11 +159,13 @@ export default function CashFlow(): JSX.Element {
         title="Cash Flow"
         allMonths={allMonths}
         allForecasts={allForecasts}
+        allForecastSource={allForecastSource}
         disabled={disabled}
         start={monthUtils.getMonth(start)}
         end={monthUtils.getMonth(end)}
         show1Month
         forecast={forecastFeatureFlag ? forecast : null}
+        forecastSource={forecastFeatureFlag ? forecastSource : null}
         onChangeDates={onChangeDates}
         onApply={onApplyFilter}
         filters={filters}
@@ -160,6 +175,7 @@ export default function CashFlow(): JSX.Element {
         onCondOpChange={onCondOpChange}
         headerPrefixItems={undefined}
         selectGraph={undefined}
+        onForecastSourceChange={setForecastSource}
       />
       <View
         style={{

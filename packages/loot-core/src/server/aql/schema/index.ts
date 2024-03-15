@@ -75,6 +75,7 @@ export const schema = {
     group: f('id', { ref: 'category_groups' }),
     sort_order: f('float'),
     tombstone: f('boolean'),
+    goal_def: f('string'),
   },
   category_groups: {
     id: f('id'),

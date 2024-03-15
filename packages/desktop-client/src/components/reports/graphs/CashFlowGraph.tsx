@@ -69,7 +69,7 @@ function CashFlowGraph({ graphData, isConcise }: CashFlowGraphProps) {
               labelComponent={<Tooltip portalHost={portalHost} />}
               labels={x => x.premadeLabel}
               style={{
-                data: { stroke: theme.pageTextSubdued },
+                data: { stroke: theme.pageTextSubdued, strokeDasharray: 5 },
               }}
             />
             <VictoryAxis
